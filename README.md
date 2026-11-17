@@ -1,3 +1,42 @@
-# Estratégias e Indicadores NTSL (Nelogica Profit)
+# Algoritmos de Execução e Indicadores Quantitativos (NTSL)
 
-Repositório de versionamento para robôs de execução, regras de coloração e indicadores customizados.
+## 📈 Trajetória e Motivação
+Minha jornada no mercado financeiro começou em **2013**. Desde os primeiros anos operando, ficou evidente que o maior desafio para a consistência não estava apenas na leitura gráfica, mas no controle da carga emocional durante a tomada de decisão.
+
+A busca por disciplina operacional me levou naturalmente à programação e à automação de processos: iniciei desenvolvendo alarmes simples e regras de coloração para auxiliar na leitura objetiva do preço e, com a evolução técnica, passei a construir robôs completos de execução automatizada. Este repositório reúne parte dessa evolução aplicada à linguagem **NTSL (Nelogica Trading System Language)**.
+
+## 🤝 Código Aberto e Propósito Educacional
+Os algoritmos aqui disponíveis são de **código aberto** para a comunidade de traders e desenvolvedores que desejam estudar lógica de programação aplicada ao mercado financeiro, compreender regras de negócio em NTSL, realizar backtests e adaptar parâmetros aos seus próprios estudos.
+
+> ⚠️ **Aviso de Responsabilidade (Disclaimer):** Como autor destes códigos, **não recomendo** a utilização de nenhuma estratégia deste repositório em conta real sem antes realizar a devida parametrização para o ativo desejado e conduzir testes rigorosos (incluindo simulações *tick a tick* e Replay de Mercado) na plataforma Profit da Nelogica. Resultados passados em testes históricos não garantem rentabilidade futura.
+
+---
+
+## 📂 Estrutura do Repositório
+
+- \/estrategias\: Robôs de execução com regras completas de entrada, condução de trade e gestão de risco.
+- \/indicadores\: Indicadores customizados e filtros de sinal.
+- \/docs\: Documentação de parâmetros e resultados de validação.
+
+---
+
+## ⚙️ Estratégia em Destaque: \wdo_scalp_MM.ntsl\
+
+### Descrição do Código
+A nomenclatura **MM (Máximas e Mínimas)** reflete a mecânica central de posicionamento e gatilho do algoritmo: a estratégia opera tomando como referência as **mínimas dos últimos candles** e as **máximas dos candles seguintes** para identificar pontos de inflexão e rompimento em movimentos de pullback.
+
+Por lidar diretamente com a amplitude e a estrutura recente dos candles, o comportamento do robô varia conforme a volatilidade e o timeframe escolhido — cabendo a cada operador parametrizar e configurar os inputs de acordo com o ativo e seu perfil operacional.
+
+### Arquitetura e Lógica Implementada
+1. **Referência de Máximas e Mínimas (MM):** Monitora extremos recentes (\HighestHigh\ e \LowestLow\) para ancorar os níveis de entrada e saída com base na estrutura dos candles.
+2. **Filtro de Tendência e Volatilidade:** Utiliza Média Móvel Exponencial (\PeriodoMedia\) combinada com múltiplos de *True Range* (\FatorTR\) para delimitar zonas extremas e limites de atuação (túnel de volatilidade).
+3. **Máquina de Estados:** Controla permissões de entrada (\CanBuy\, \CanSell\), contagem de barras de confirmação (\QtdBarrasConfirmacao\) e rastreamento de índice de barra (\EntryBarIndex\) para evitar múltiplas entradas no mesmo sinal.
+4. **Realismo de Fila (Backtest):** Aplica deslocamento de preço (\Offset\) nas ordens limite para simular a perda de prioridade no livro de ofertas durante testes históricos.
+5. **Gestão Dinâmica de Risco:** Calcula stop loss inicial (\StopLossPontos\), alvo financeiro (\AlvoGain\) e mecanismo de redução progressiva de risco (\ReducaoStop\).
+
+---
+
+## 🛠️ Stack & Ferramentas
+- **Linguagem:** NTSL (baseada em Object Pascal / Delphi)
+- **Plataforma:** Nelogica Profit Pro
+- **Versionamento:** Git & GitHub

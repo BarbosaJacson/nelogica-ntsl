@@ -1,0 +1,153 @@
+{ 
+  ESTRATÉGIA: Pullback de Tendência com Realismo de Fila (Offset)
+  VERSÃO: Backtest com Lógica de Túnel (Bandas de Volatilidade)
+}
+
+input
+  DiasRetroativos(2);      
+  StopLossPontos(9);      
+  TamanhoLote(1);          
+  PeriodoMedia(115);       
+  QtdBarrasConfirmacao(3); 
+  ReducaoStop(1);        
+  FatorTR(3.5);            
+  QtdBarrasBanda(2);       
+  AlvoGain(3);             
+
+var
+  HighestHigh, LowestLow : Float;
+  PrecoEntradaCompra, PrecoEntradaVenda : Float; 
+  ExpMovingAvg, VolatilityTR : Float;
+  UpperBandExtreme, UpperBandLimit : Float;
+  LowerBandExtreme, LowerBandLimit : Float;
+  
+  // Variáveis de Lógica de Túnel
+  DentroTunelCompra, DentroTunelVenda : Integer;
+  
+  CountBandSignalBuy, CountBandSignalSell : Float;
+  CanBuy, CanSell : Boolean;
+  EntryBarIndex : Integer;
+  CurrentStopPrice, BaseStopPrice : Float;
+  TargetPriceBuy, TargetPriceSell : Float;
+  BarsSinceEntry : Integer;
+  DistanceToMA : Float;
+
+Begin
+  // 1. CÁLCULOS E INDICADORES
+  // -----------------------------------------------------------
+  HighestHigh := Highest(High, DiasRetroativos); 
+  LowestLow   := Lowest(Low, DiasRetroativos);  
+  
+  // PENALIDADE (BACKTEST REALISTA)
+  PrecoEntradaCompra := LowestLow + MinPriceIncrement; 
+  PrecoEntradaVenda  := HighestHigh - MinPriceIncrement;
+
+  ExpMovingAvg := MediaExp(PeriodoMedia, Close);
+  VolatilityTR := MediaExp(PeriodoMedia, TrueRange); 
+
+  UpperBandExtreme := ExpMovingAvg + (VolatilityTR * FatorTR);
+  UpperBandLimit   := ExpMovingAvg + VolatilityTR;
+  LowerBandExtreme := ExpMovingAvg - (VolatilityTR * FatorTR);
+  LowerBandLimit   := ExpMovingAvg - VolatilityTR;
+
+  // Distância para a Média (Filtro de volatilidade)
+  If (PrecoEntradaCompra > ExpMovingAvg) Then DistanceToMA := (PrecoEntradaCompra - ExpMovingAvg);
+  If (ExpMovingAvg > PrecoEntradaVenda) Then DistanceToMA := (ExpMovingAvg - PrecoEntradaVenda);
+
+  // 2. LÓGICA DE SINAL (TÚNEIS)
+  // -----------------------------------------------------------
+  
+  // Verifica se o fechamento anterior está DENTRO da zona Azul (Compra)
+  If (Close[1] > UpperBandLimit) And (Close[1] < UpperBandExtreme) Then
+    DentroTunelCompra := 1
+  Else
+    DentroTunelCompra := 0;
+
+  // Verifica se o fechamento anterior está DENTRO da zona Rosa (Venda)
+  If (Close[1] < LowerBandLimit) And (Close[1] > LowerBandExtreme) Then
+    DentroTunelVenda := 1
+  Else
+    DentroTunelVenda := 0;
+  
+  // Contagem de confirmação (Candles consecutivos no túnel)
+  CountBandSignalBuy  := Summation(DentroTunelCompra, QtdBarrasConfirmacao);
+  CountBandSignalSell := Summation(DentroTunelVenda, QtdBarrasConfirmacao);
+
+  // 3. PLOTAGEM (Visualização no Gráfico)
+  // -----------------------------------------------------------
+  Plot(UpperBandExtreme); Plot2(UpperBandLimit);
+  SetPlotColor(1, clBlue); SetPlotColor(2, clBlue);
+
+  Plot3(LowerBandExtreme); Plot4(LowerBandLimit);
+  SetPlotColor(3, clRed); SetPlotColor(4, clRed);
+  
+  Plot5(ExpMovingAvg);
+  SetPlotColor(5, clWhite); // Média Central
+
+  // 4. CONDIÇÕES DE ENTRADA
+  // -----------------------------------------------------------
+  CanBuy := (CountBandSignalBuy >= QtdBarrasConfirmacao) 
+            AND (DistanceToMA <= StopLossPontos);
+
+  CanSell := (CountBandSignalSell >= QtdBarrasConfirmacao)
+             AND (DistanceToMA <= StopLossPontos);
+
+  // 5. EXECUÇÃO DE ORDENS
+  // -----------------------------------------------------------
+  
+  If CanBuy And (BuyPosition = 0) And (Time < 1630) Then
+  Begin
+    SendOrder(osBuy, otLimit, TamanhoLote, PrecoEntradaCompra, PrecoEntradaCompra);
+    PaintBar(clNavy);
+    EntryBarIndex := CurrentBar;
+  End;
+
+  If CanSell And (SellPosition = 0) And (Time < 1630) Then
+  Begin
+    SendOrder(osSell, otLimit, TamanhoLote, PrecoEntradaVenda, PrecoEntradaVenda);
+    PaintBar(clFuchsia);
+    EntryBarIndex := CurrentBar;
+  End;
+
+  // --- SAÍDAS & GERENCIAMENTO (ALVO REALISTA DE FILA) ---
+  If IsBought Then
+  Begin
+    TargetPriceBuy  := BuyPrice + AlvoGain;
+    BarsSinceEntry := CurrentBar - EntryBarIndex;
+    If BarsSinceEntry < 0 Then BarsSinceEntry := 0; 
+    
+    BaseStopPrice    := BuyPrice - StopLossPontos;
+    CurrentStopPrice := BaseStopPrice + (BarsSinceEntry * ReducaoStop);
+    
+    SendOrder(osSell, otStopLimit, TamanhoLote, CurrentStopPrice, CurrentStopPrice);
+    
+    If (High > TargetPriceBuy) Then 
+      SellToCoverLimit(TargetPriceBuy, TamanhoLote)
+    Else If (HighestHigh < TargetPriceBuy) Then
+      SellToCoverLimit(HighestHigh - MinPriceIncrement, TamanhoLote)
+    Else
+      SendOrder(osSell, otLimit, TamanhoLote, TargetPriceBuy, TargetPriceBuy);
+  End;
+
+  If IsSold Then
+  Begin
+    TargetPriceSell := SellPrice - AlvoGain;
+    BarsSinceEntry := CurrentBar - EntryBarIndex;
+    If BarsSinceEntry < 0 Then BarsSinceEntry := 0;
+
+    BaseStopPrice    := SellPrice + StopLossPontos;
+    CurrentStopPrice := BaseStopPrice - (BarsSinceEntry * ReducaoStop);
+    
+    SendOrder(osBuy, otStopLimit, TamanhoLote, CurrentStopPrice, CurrentStopPrice);
+
+    If (Low < TargetPriceSell) Then 
+      BuyToCoverLimit(TargetPriceSell, TamanhoLote)
+    Else If (LowestLow > TargetPriceSell) Then
+      BuyToCoverLimit(LowestLow + MinPriceIncrement, TamanhoLote)
+    Else
+      SendOrder(osBuy, otLimit, TamanhoLote, TargetPriceSell, TargetPriceSell);
+  End;
+
+  If (Time >= 1630) Then ClosePosition;
+
+End;

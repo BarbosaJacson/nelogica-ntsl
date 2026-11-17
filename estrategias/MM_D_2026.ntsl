@@ -1,0 +1,156 @@
+{
+  ESTRATÉGIA: Pullback em Canal de Volatilidade (Máximas e Mínimas)
+  DESCRIÇÃO: Opera retorno às mínimas/máximas recentes filtrado por MME e True Range,
+             com ajuste progressivo de stop (step-stop) por tempo na operação.
+}
+
+input
+  Capital(10000);
+  Dias(2);
+  MediaMovel(90);
+  FatorTR(4.0);
+  PeriodosConfirmacao(3);
+  PorcentagemAlvo(1.0);
+  LossCompra(0.92);
+  LossVenda(1.08);
+  ReducaoStopCompra(1.01);
+  ReducaoStopVenda(0.99);
+  MaxDegrausStop(5);
+  MaxBarrasTrade(7);
+
+var
+  // Estrutura de Preço e Volatilidade
+  MaxPeriodo, MinPeriodo : Float;
+  MME, VolatilidadeTR    : Float;
+  LimiteSup, LimiteInf   : Float;
+
+  // Controle de Filtro e Sinal
+  DentroCanalCompra, DentroCanalVenda : Integer;
+  SomaCanalCompra, SomaCanalVenda     : Float;
+  FiltroCompra, FiltroVenda           : Boolean;
+  SinalCompra, SinalVenda             : Boolean;
+
+  // Execução e Gestão de Risco
+  LoteCompra, LoteVenda               : Integer;
+  BarraEntradaCompra, BarraEntradaVenda : Integer;
+  BarrasDecorridas                    : Integer;
+  StopInicial, StopAtual, AlvoAtual   : Float;
+
+inicio
+  // 1. Cálculos de Estrutura e Indicadores (Ordem corrigida)
+  MaxPeriodo     := Highest(High, Dias);
+  MinPeriodo     := Lowest(Low, Dias);
+  MME            := MediaExp(MediaMovel, Close);
+  VolatilidadeTR := MediaExp(MediaMovel, TrueRange);
+
+  LimiteSup := MME + (VolatilidadeTR * FatorTR);
+  LimiteInf := MME - (VolatilidadeTR * FatorTR);
+
+  // 2. Verificação de Permanência no Canal de Volatilidade
+  se (MME < Close[1]) e (LimiteSup > Close[1]) entao
+    DentroCanalCompra := 1
+  senao
+    DentroCanalCompra := 0;
+
+  se (MME > Close[1]) e (LimiteInf < Close[1]) entao
+    DentroCanalVenda := 1
+  senao
+    DentroCanalVenda := 0;
+
+  SomaCanalCompra := Summation(DentroCanalCompra, PeriodosConfirmacao);
+  SomaCanalVenda  := Summation(DentroCanalVenda, PeriodosConfirmacao);
+
+  // Plotagem Visual das Bandas Ativas
+  se (SomaCanalCompra >= PeriodosConfirmacao) entao
+    Plot(LimiteSup);
+  se (SomaCanalVenda >= PeriodosConfirmacao) entao
+    Plot2(LimiteInf);
+
+  SetPlotColor(1, clAzul);
+  SetPlotColor(2, clAzul);
+
+  // 3. Definição de Filtros e Dimensionamento de Lote
+  FiltroCompra := (SomaCanalCompra >= PeriodosConfirmacao) e (Close > MME);
+  FiltroVenda  := (SomaCanalVenda >= PeriodosConfirmacao) e (Close < MME);
+
+  se (CurrentBar > 15) e (MinPeriodo > 0) e (MaxPeriodo > 0) entao
+  inicio
+    LoteCompra := Round(Capital / MinPeriodo);
+    LoteVenda  := Round(Capital / MaxPeriodo);
+  fim;
+
+  // 4. Gatilhos de Entrada (Apenas zerado)
+  SinalCompra := (BuyPosition = 0) e (SellPosition = 0) e FiltroCompra;
+  SinalVenda  := (BuyPosition = 0) e (SellPosition = 0) e FiltroVenda;
+
+  se SinalCompra entao
+  inicio
+    SendOrder(osBuy, otLimit, LoteCompra, MinPeriodo[1], MinPeriodo[1]);
+    PaintBar(clNavy);
+    BarraEntradaCompra := CurrentBar;
+  fim;
+
+  se SinalVenda entao
+  inicio
+    SendOrder(osSell, otLimit, LoteVenda, MaxPeriodo[1], MaxPeriodo[1]);
+    PaintBar(clFucsia);
+    BarraEntradaVenda := CurrentBar;
+  fim;
+
+  // 5. Gestão da Posição Comprada (Alvo + Stop Progressivo + Saída por Tempo)
+  se IsBought entao
+  inicio
+    // Limita o expoente ao máximo de degraus configurado (ex: 0 a 5)
+    BarrasDecorridas := CurrentBar - BarraEntradaCompra;
+    se (BarrasDecorridas > MaxDegrausStop) entao
+      BarrasDecorridas := MaxDegrausStop;
+    se (BarrasDecorridas < 0) entao
+      BarrasDecorridas := 0;
+
+    // Cálculo dinâmico em linha única substituindo stopc1..stopc6
+    StopInicial := BuyPrice * LossCompra;
+    StopAtual   := StopInicial * Power(ReducaoStopCompra, BarrasDecorridas);
+    AlvoAtual   := BuyPrice * (1 + (PorcentagemAlvo / 100));
+
+    // Envio de Alvo Limite
+    se (MaxPeriodo[1] < AlvoAtual) entao
+      SellToCoverLimit(AlvoAtual, LoteCompra)
+    senao
+      SellToCoverLimit(MaxPeriodo[1], LoteCompra);
+
+    // Envio de Stop Loss
+    SendOrder(osSell, otStopLimit, LoteCompra, StopAtual, StopAtual);
+
+    // Saída por tempo (Time Stop)
+    se ((CurrentBar - BarraEntradaCompra) > MaxBarrasTrade) entao
+      ClosePosition;
+  fim;
+
+  // 6. Gestão da Posição Vendida (Alvo + Stop Progressivo + Saída por Tempo)
+  se IsSold entao
+  inicio
+    BarrasDecorridas := CurrentBar - BarraEntradaVenda;
+    se (BarrasDecorridas > MaxDegrausStop) entao
+      BarrasDecorridas := MaxDegrausStop;
+    se (BarrasDecorridas < 0) entao
+      BarrasDecorridas := 0;
+
+    // Cálculo dinâmico em linha única substituindo stopv1..stopv6
+    StopInicial := SellPrice * LossVenda;
+    StopAtual   := StopInicial * Power(ReducaoStopVenda, BarrasDecorridas);
+    AlvoAtual   := SellPrice * (1 - (PorcentagemAlvo / 100));
+
+    // Envio de Alvo Limite
+    se (MinPeriodo[1] > AlvoAtual) entao
+      BuyToCoverLimit(AlvoAtual, LoteVenda)
+    senao
+      BuyToCoverLimit(MinPeriodo[1], LoteVenda);
+
+    // Envio de Stop Loss
+    SendOrder(osBuy, otStopLimit, LoteVenda, StopAtual, StopAtual);
+
+    // Saída por tempo (Time Stop)
+    se ((CurrentBar - BarraEntradaVenda) > MaxBarrasTrade) entao
+      ClosePosition;
+  fim;
+fim;
